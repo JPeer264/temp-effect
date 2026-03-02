@@ -1,18 +1,20 @@
 import * as Sentry from "@sentry/node"
-import {
-  SentryPropagator,
-  SentrySampler,
-  SentrySpanProcessor,
-  setOpenTelemetryContextAsyncContextStrategy,
-  setupEventContextTrace,
-  wrapContextManagerClass,
-} from "@sentry/opentelemetry"
 import { Resource, Tracer as OtelTracer } from "@effect/opentelemetry"
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks"
-import { context, propagation, trace } from "@opentelemetry/api"
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base"
 import { Context, Effect, Layer } from "effect"
-import type { NodeClient } from "@sentry/node"
+
+// Minimal Integration type matching Sentry's integration interface
+interface SentryIntegration {
+  name: string
+  setupOnce?(): void
+  setup?(client: Sentry.NodeClient): void
+  afterAllSetup?(client: Sentry.NodeClient): void
+  preprocessEvent?(event: Sentry.Event, hint: Sentry.EventHint | undefined, client: Sentry.NodeClient): void
+  processEvent?(
+    event: Sentry.Event,
+    hint: Sentry.EventHint,
+    client: Sentry.NodeClient
+  ): Sentry.Event | null | PromiseLike<Sentry.Event | null>
+}
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -97,40 +99,19 @@ const makeSentryService = (): SentryService => ({
 })
 
 // -----------------------------------------------------------------------------
-// OpenTelemetry + Sentry initialization
+// Sentry initialization
 // -----------------------------------------------------------------------------
 
-const SentryContextManager = wrapContextManagerClass(AsyncLocalStorageContextManager)
-
-const initSentryAndOtel = (config: SentryConfig): NodeClient => {
+const initSentry = (config: SentryConfig): void => {
   Sentry.init({
     dsn: config.dsn,
     environment: config.environment,
     release: config.release,
     tracesSampleRate: config.tracesSampleRate ?? 1.0,
     debug: config.debug ?? false,
-    skipOpenTelemetrySetup: true,
+    // Let Sentry handle all OpenTelemetry setup internally
+    // This sets up the tracer provider, propagator, context manager, sampler, and span processor
   })
-
-  const client = Sentry.getClient<NodeClient>()
-  if (!client) {
-    throw new Error("Sentry client not initialized")
-  }
-
-  setupEventContextTrace(client)
-
-  const provider = new BasicTracerProvider({
-    sampler: new SentrySampler(client),
-    spanProcessors: [new SentrySpanProcessor()],
-  })
-
-  trace.setGlobalTracerProvider(provider)
-  propagation.setGlobalPropagator(new SentryPropagator())
-  context.setGlobalContextManager(new SentryContextManager())
-
-  setOpenTelemetryContextAsyncContextStrategy()
-
-  return client
 }
 
 // -----------------------------------------------------------------------------
@@ -138,7 +119,7 @@ const initSentryAndOtel = (config: SentryConfig): NodeClient => {
 // -----------------------------------------------------------------------------
 
 const SentryInitLayer = (config: SentryConfig): Layer.Layer<never> =>
-  Layer.effectDiscard(Effect.sync(() => initSentryAndOtel(config)))
+  Layer.effectDiscard(Effect.sync(() => initSentry(config)))
 
 const ResourceLayer = (config: SentryConfig): Layer.Layer<Resource.Resource> => {
   const resourceConfig: { serviceName: string; serviceVersion?: string } = {
@@ -156,14 +137,21 @@ const SentryServiceLayer: Layer.Layer<SentryService> = Layer.succeed(
 )
 
 export const SentryLive = (config: SentryConfig): Layer.Layer<SentryService> => {
+  // First initialize Sentry (which sets up the global OTel tracer provider)
   const Init = SentryInitLayer(config)
+
+  // Then create the Effect tracer layer that uses the global provider Sentry set up
   const Res = ResourceLayer(config)
   const EffectTracer = OtelTracer.layerGlobal.pipe(
     Layer.provide(Res),
     Layer.discard
   )
 
-  return Layer.merge(Layer.merge(Init, EffectTracer), SentryServiceLayer)
+  // Ensure Sentry is initialized before Effect tries to use the global tracer
+  return Init.pipe(
+    Layer.provideMerge(EffectTracer),
+    Layer.provideMerge(SentryServiceLayer)
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -316,7 +304,7 @@ const INTEGRATION_NAME = "EffectIntegration"
  */
 export const effectIntegration = (
   options: EffectIntegrationOptions = {}
-): Sentry.Integration => {
+): SentryIntegration => {
   const { captureFiberInfo = true, addBreadcrumbs = true, tags = {} } = options
 
   return {
@@ -327,7 +315,7 @@ export const effectIntegration = (
       // Use for global monkey-patching or similar operations
     },
 
-    setup(client: Sentry.Client) {
+    setup(client: Sentry.NodeClient) {
       // Setup for each client instance
       // Add Effect-specific event listeners or hooks here
       if (addBreadcrumbs) {
@@ -341,12 +329,12 @@ export const effectIntegration = (
       }
     },
 
-    afterAllSetup(_client: Sentry.Client) {
+    afterAllSetup(_client: Sentry.NodeClient) {
       // Called after all integrations have been set up
       // Useful for operations that depend on other integrations being initialized
     },
 
-    preprocessEvent(event: Sentry.Event, _hint: Sentry.EventHint | undefined, _client: Sentry.Client) {
+    preprocessEvent(event: Sentry.Event, _hint: Sentry.EventHint | undefined, _client: Sentry.NodeClient) {
       // Preprocess events before they go through other event processors
       // Add Effect-specific tags
       if (!event.tags) {
@@ -371,7 +359,7 @@ export const effectIntegration = (
       }
     },
 
-    processEvent(event: Sentry.Event, _hint: Sentry.EventHint, _client: Sentry.Client) {
+    processEvent(event: Sentry.Event, _hint: Sentry.EventHint, _client: Sentry.NodeClient) {
       // Process events - can modify, drop (return null), or pass through
       // Return the event to send it, null to drop it, or a Promise
 
