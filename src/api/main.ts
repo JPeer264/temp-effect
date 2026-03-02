@@ -1,7 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node"
 import { Layer } from "effect"
 import { HttpLive } from "./Http.js"
-import { SentryLive, type SentryService } from "./Sentry.js"
+import { SentryLive } from "./Sentry.js"
 import * as Sentry from "@sentry/node"
 
 const client = Sentry.init({
@@ -9,6 +9,7 @@ const client = Sentry.init({
   environment: process.env.NODE_ENV ?? "development",
   tracesSampleRate: 1.0,
   debug: true,
+  enableLogs: true,
 })
 
 const MainLive = HttpLive.pipe(Layer.provideMerge(SentryLive(client)))

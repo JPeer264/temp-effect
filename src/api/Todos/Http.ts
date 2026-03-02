@@ -15,7 +15,12 @@ export const HttpTodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
         todos.list
       )
       .handle("create", ({ payload }) =>
-        todos.create(payload)
+        Effect.gen(function* () {
+          yield* Effect.logInfo("Creating todo").pipe(
+            Effect.annotateLogs("title", payload.title)
+          )
+          return yield* todos.create(payload)
+        })
       )
       .handle("findById", ({ path }) =>
         Effect.gen(function* () {
