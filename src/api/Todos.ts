@@ -1,70 +1,91 @@
-import { Effect, Option, Ref } from "effect"
+import { SqlClient } from "@effect/sql"
+import { Effect, Option } from "effect"
 import { Todo, TodoCreateInput, TodoId, TodoNotFound, TodoUpdateInput } from "./Domain/Todo.js"
+
+interface TodoRow {
+  readonly id: number
+  readonly title: string
+  readonly completed: boolean
+  readonly created_at: Date
+}
+
+const rowToTodo = (row: TodoRow): Todo =>
+  new Todo({
+    id: `todo-${row.id}` as TodoId,
+    title: row.title,
+    completed: row.completed,
+    createdAt: row.created_at.toISOString(),
+  })
+
+const parseId = (id: TodoId): Effect.Effect<number, TodoNotFound> => {
+  const match = id.match(/^todo-(\d+)$/)
+  if (!match || !match[1]) return Effect.fail(new TodoNotFound({ id }))
+  return Effect.succeed(parseInt(match[1], 10))
+}
 
 export class Todos extends Effect.Service<Todos>()("Todos", {
   effect: Effect.gen(function* () {
-    const store = yield* Ref.make<Map<TodoId, Todo>>(new Map())
-    let idCounter = 0
+    const sql = yield* SqlClient.SqlClient
 
-    const generateId = (): TodoId => {
-      idCounter++
-      return `todo-${idCounter}` as TodoId
-    }
-
-    const list = Effect.gen(function* () {
-      const todos = yield* Ref.get(store)
-      return Array.from(todos.values())
-    }).pipe(Effect.withSpan("Todos.list"))
+    const list = sql<TodoRow>`SELECT * FROM todos ORDER BY created_at DESC`.pipe(
+      Effect.map((rows) => rows.map(rowToTodo)),
+      Effect.orDie,
+      Effect.withSpan("Todos.list"),
+    )
 
     const create = (input: TodoCreateInput) =>
-      Effect.gen(function* () {
-        const id = generateId()
-        const todo = new Todo({
-          id,
-          title: input.title,
-          completed: false,
-          createdAt: new Date().toISOString()
-        })
-        yield* Ref.update(store, (map) => new Map(map).set(id, todo))
-        return todo
-      }).pipe(Effect.withSpan("Todos.create", { attributes: { input } }))
+      sql<TodoRow>`INSERT INTO todos (title) VALUES (${input.title}) RETURNING *`.pipe(
+        Effect.flatMap((rows) =>
+          rows[0] ? Effect.succeed(rowToTodo(rows[0])) : Effect.die("Insert returned no rows"),
+        ),
+        Effect.orDie,
+        Effect.withSpan("Todos.create", { attributes: { input } }),
+      )
 
     const findById = (id: TodoId) =>
-      Effect.gen(function* () {
-        const todos = yield* Ref.get(store)
-        return Option.fromNullable(todos.get(id))
-      }).pipe(Effect.withSpan("Todos.findById", { attributes: { id } }))
+      parseId(id).pipe(
+        Effect.flatMap((numericId) => sql<TodoRow>`SELECT * FROM todos WHERE id = ${numericId}`),
+        Effect.map((rows) => (rows[0] ? Option.some(rowToTodo(rows[0])) : Option.none())),
+        Effect.orDie,
+        Effect.withSpan("Todos.findById", { attributes: { id } }),
+      )
 
     const update = (id: TodoId, input: TodoUpdateInput) =>
       Effect.gen(function* () {
-        const todos = yield* Ref.get(store)
-        const existing = todos.get(id)
-        if (!existing) {
+        const numericId = yield* parseId(id)
+        const existing = yield* sql<TodoRow>`SELECT * FROM todos WHERE id = ${numericId}`
+        const current = existing[0]
+        if (!current) {
           return yield* Effect.fail(new TodoNotFound({ id }))
         }
-        const updated = new Todo({
-          id: existing.id,
-          title: input.title ?? existing.title,
-          completed: input.completed ?? existing.completed,
-          createdAt: existing.createdAt
-        })
-        yield* Ref.update(store, (map) => new Map(map).set(id, updated))
-        return updated
-      }).pipe(Effect.withSpan("Todos.update", { attributes: { id, input } }))
+
+        const newTitle = input.title ?? current.title
+        const newCompleted = input.completed ?? current.completed
+
+        const updated = yield* sql<TodoRow>`
+          UPDATE todos 
+          SET title = ${newTitle}, completed = ${newCompleted}
+          WHERE id = ${numericId}
+          RETURNING *
+        `
+        const updatedRow = updated[0]
+        if (!updatedRow) {
+          return yield* Effect.die("Update returned no rows")
+        }
+        return rowToTodo(updatedRow)
+      }).pipe(Effect.orDie, Effect.withSpan("Todos.update", { attributes: { id, input } }))
 
     const remove = (id: TodoId) =>
       Effect.gen(function* () {
-        const todos = yield* Ref.get(store)
-        if (!todos.has(id)) {
+        const numericId = yield* parseId(id)
+        const existing = yield* sql<TodoRow>`SELECT * FROM todos WHERE id = ${numericId}`
+        if (existing.length === 0) {
           return yield* Effect.fail(new TodoNotFound({ id }))
         }
-        yield* Ref.update(store, (map) => {
-          const newMap = new Map(map)
-          newMap.delete(id)
-          return newMap
-        })
-      }).pipe(Effect.withSpan("Todos.remove", { attributes: { id } }))
+        yield* sql`DELETE FROM todos WHERE id = ${numericId}`
+      }).pipe(Effect.orDie, Effect.withSpan("Todos.remove", { attributes: { id } }))
 
     return { list, create, findById, update, remove } as const
-  })
+  }),
+  dependencies: [],
 }) {}

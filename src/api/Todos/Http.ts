@@ -38,4 +38,4 @@ export const HttpTodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
         todos.remove(path.id)
       )
   })
-).pipe(Layer.provide(Todos.Default))
+)
