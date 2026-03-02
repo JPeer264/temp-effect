@@ -28,10 +28,6 @@ const SentryLogger = Logger.make(({ logLevel, message }) => {
   }
 });
 
-// -----------------------------------------------------------------------------
-// Layers
-// -----------------------------------------------------------------------------
-
 const ResourceLayer = (
   client: Sentry.NodeClient,
 ): Layer.Layer<Resource.Resource> => {
@@ -44,29 +40,27 @@ const ResourceLayer = (
 export function SentryLive(
   client?: Sentry.NodeClient,
 ): Layer.Layer<SentryService> {
-  if (!client) {
+  const currentClient = Sentry.getClient() as Sentry.NodeClient | undefined || client;
+
+  if (!currentClient) {
     return Layer.succeed(SentryService, { client: undefined });
   }
 
-  const { enableLogs = false } = client.getOptions() ?? {};
+  const { enableLogs = false } = currentClient.getOptions() ?? {};
 
-  // Then create the Effect tracer layer that uses the global provider Sentry set up
-  const Res = ResourceLayer(client);
+  const Res = ResourceLayer(currentClient);
   const EffectTracer = OtelTracer.layerGlobal.pipe(
     Layer.provide(Res),
     Layer.discard,
   );
 
-  // Provide SentryService to the context
-  const SentryServiceLayer = Layer.succeed(SentryService, { client });
+  const SentryServiceLayer = Layer.succeed(SentryService, { client: currentClient });
 
-  // Base layers
-  let layer = Layer.effectDiscard(Effect.sync(() => client)).pipe(
+  let layer = Layer.effectDiscard(Effect.sync(() => currentClient)).pipe(
     Layer.provideMerge(EffectTracer),
     Layer.provideMerge(SentryServiceLayer),
   );
 
-  // Conditionally add logger layer
   if (enableLogs) {
     const EffectLogger = Logger.replace(Logger.defaultLogger, SentryLogger);
     layer = layer.pipe(Layer.provideMerge(EffectLogger));
