@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"pnpm dev:api\" \"pnpm dev:frontend\"",
-    "dev:api": "tsx --watch src/api/main.ts",
+    "dev:api": "tsx --import=./src/api/instrument.server.js --watch src/api/main.ts",
     "dev:frontend": "vite",
     "build": "vite build",
     "check": "tsc -b tsconfig.json"
