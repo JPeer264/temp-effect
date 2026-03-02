@@ -8,10 +8,6 @@ export interface SentryService {
 export const SentryService =
   Context.GenericTag<SentryService>("@app/SentryService");
 
-// -----------------------------------------------------------------------------
-// Sentry Logger
-// -----------------------------------------------------------------------------
-
 const SentryLogger = Logger.make(({ logLevel, message }) => {
   const msg = typeof message === "string" ? message : JSON.stringify(message);
 
@@ -68,3 +64,5 @@ export function SentryLive(
 
   return layer;
 }
+
+export const withSentry = Layer.provideMerge(SentryLive());
