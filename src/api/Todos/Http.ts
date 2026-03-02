@@ -1,14 +1,21 @@
 import { HttpApiBuilder } from "@effect/platform"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Layer, Metric, Option } from "effect"
 import { Api } from "../Api.js"
 import { TodoNotFound } from "../Domain/Todo.js"
 import { Todos } from "../Todos.js"
 import * as SentryEffect from "../Sentry.js"
 
+const TodosCreatedCounter = Metric.counter("todos.created").pipe(
+  Metric.withConstantInput(1),
+)
+
+const TodosDeletedCounter = Metric.counter("todos.deleted").pipe(
+  Metric.withConstantInput(1),
+)
+
 export const HttpTodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
   Effect.gen(function* () {
     const todos = yield* Todos
-    const sentry = yield* SentryEffect.SentryService
 
     return handlers
       .handle("list", () =>
@@ -19,8 +26,10 @@ export const HttpTodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
           yield* Effect.logInfo("Creating todo").pipe(
             Effect.annotateLogs("title", payload.title)
           )
-          return yield* todos.create(payload)
-        })
+          const todo = yield* todos.create(payload)
+          yield* Metric.increment(TodosCreatedCounter)
+          return todo
+        }).pipe(Effect.withSpan("Some custom span"))
       )
       .handle("findById", ({ path }) =>
         Effect.gen(function* () {
@@ -35,7 +44,10 @@ export const HttpTodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
         todos.update(path.id, payload)
       )
       .handle("delete", ({ path }) =>
-        todos.remove(path.id)
+        Effect.gen(function* () {
+          yield* todos.remove(path.id)
+          yield* Metric.increment(TodosDeletedCounter)
+        })
       )
   })
 )

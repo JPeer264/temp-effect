@@ -7,8 +7,5 @@ Sentry.init({
   tracesSampleRate: 1.0,
   debug: true,
   enableLogs: true,
-  beforeSendTransaction: (event, hint) => {
-    console.log("beforeSendTransaction", event, hint)
-    return event
-  },
+  enableMetrics: true,
 })

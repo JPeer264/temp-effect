@@ -81,7 +81,14 @@ class SentrySpanWrapper implements SentrySpanLike {
     };
   }
 
+  private isSpanRecording(): boolean {
+    return this.sentrySpan.isRecording();
+  }
+
   attribute(key: string, value: unknown): void {
+    if (!this.isSpanRecording()) {
+      return;
+    }
     this.sentrySpan.setAttribute(
       key,
       value as Parameters<Sentry.Span["setAttribute"]>[1],
@@ -100,6 +107,10 @@ class SentrySpanWrapper implements SentrySpanLike {
       exit,
       startTime: this.status.startTime,
     };
+
+    if (!this.isSpanRecording()) {
+      return;
+    }
 
     if (Exit.isFailure(exit)) {
       const cause = exit.cause;
@@ -124,6 +135,9 @@ class SentrySpanWrapper implements SentrySpanLike {
     startTime: bigint,
     attributes?: Record<string, unknown>,
   ): void {
+    if (!this.isSpanRecording()) {
+      return;
+    }
     this.sentrySpan.addEvent(
       name,
       attributes as Parameters<Sentry.Span["addEvent"]>[1],
