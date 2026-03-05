@@ -1,4 +1,4 @@
-import * as Sentry from "@sentry/node";
+import * as Sentry from "@sentry/effect";
 import { Layer, Logger } from "effect";
 import { SentryLogger } from "./sentry/logger.js";
 import { SentryMetricsLayer } from "./sentry/metrics.js";

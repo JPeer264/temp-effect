@@ -13,12 +13,6 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.25.0",
-  "pnpm": {
-    "overrides": {
-      "@sentry/core": "file:.yalc/@sentry/core",
-      "@sentry/node": "file:.yalc/@sentry/node"
-    }
-  },
   "devDependencies": {
     "@types/node": "^22.8.5",
     "@types/react": "^19.0.0",
@@ -30,13 +24,11 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "@effect/opentelemetry": "^0.61.0",
     "@effect/platform": "^0.94.5",
     "@effect/platform-node": "^0.104.1",
     "@effect/sql": "^0.49.0",
     "@effect/sql-pg": "^0.50.3",
-    "@sentry/core": "file:.yalc/@sentry/core",
-    "@sentry/node": "file:.yalc/@sentry/node",
+    "@sentry/effect": "file:.yalc/@sentry/effect",
     "@sentry/react": "^10.41.0",
     "effect": "^3.19.19",
     "react": "^19.0.0",
