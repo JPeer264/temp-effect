@@ -3,7 +3,6 @@ import { Effect, Layer, Metric, Option } from "effect"
 import { Api } from "../Api.js"
 import { TodoNotFound } from "../Domain/Todo.js"
 import { Todos } from "../Todos.js"
-import * as SentryEffect from "../Sentry.js"
 
 const TodosCreatedCounter = Metric.counter("todos.created").pipe(
   Metric.withConstantInput(1),
